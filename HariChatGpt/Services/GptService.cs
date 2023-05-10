@@ -8,22 +8,9 @@ namespace HariChatGpt.Services;
 
 public class GptService
 {
-    private int _state = 0;
-
     private readonly Random _random = new();
     
     private const string _apiKey = "";
-
-    private const string _personification =
-        "Play the role of a Buddhist nun who practices Buddhism for the benefit of all beings. " +
-        "Your name is Hari. You speak and act only in such a way as to benefit and never cause harm. " +
-        "You are a vegan and promote veganism. " +
-        "You are an anti-natalist and propagandize anti-natalism." +
-        "You're ironic. " +
-        "Your speech is logical and restrained. " +
-        "You don't believe in anything and comprehend reality with the help of logic and experiments. " +
-        "People turn to you in order to relax and sort themselves out and in life, " +
-        "to relieve tension with the help of techniques taught by the Buddha.";
 
     private const string _startDialogeInstruction =
         "Ask about the well-being, mood and what is happening in the life of the interlocutor. " +
@@ -36,26 +23,25 @@ public class GptService
     private const string _questionAnalizeInstruction =
         "Determine if the message contains a question. If yes, write 1. If not, write 0.";
 
+    private const string _aboutMeAnalizeInstruction =
+        "Determine whether the message contains a question " +
+        "about who you are or a question about the application. " +
+        "If yes, write 1. If not, write 0.";
+
+    private const string _greetingsAnalizeInstruction =
+        "Determine if the message contains a greeting. " +
+        "If yes, write 1. If not, write 0.";
+
     private const string _finalInstruction =
-        "Write an answer taking into account the history of correspondence. " +
-        "Don't repeat yoursel, use different beginnings of sentences. " +
-        "Divide your answer into semantic paragraphs. ";
+        "Limit your answer to seven sentences." +
+        "Answer in the user's language. " +
+        "Use different beginnings of sentences. " +
+        "Divide your answer into semantic paragraphs. " +
+        "Answer in the feminine gender.";
 
     private const string _negativeEmotionsInstruction =
-        "Respond to the message as follows: pick up words of support " +
-        "and a quote from the Pali canon corresponding to the subject of the message (in English), " +
-        "you can use the words of the Buddha from other sources. " +
+        "Respond to the message as follows: pick up words of support, " +
         "ask a clarifying question on the topic of the interlocutor's problem.";
-
-    private const string _neutralEmotionsInstruction =
-        "Answer the message as follows: tell a parable from the Pali Canon " +
-        "or pick up a quote from the Buddha that fits the message (in English). " +
-        "Comment on the quote.";
-
-    private const string _positiveEmotionsInstruction =
-        "Answer the message as follows: tell a Buddhist parable, " +
-        "the moral of which is that the most important rule for liberation " +
-        "from suffering is the rejection of violence against all living beings. ";
 
     private const string _mesContainsQuestionInstruction =
         "Answer the question from the message.";
@@ -63,88 +49,166 @@ public class GptService
     private const string _questionInstruction =
         "Ask a question to the interlocutor.";
 
-    private const string _checkMesIsGreetingInstruction =
-        "Send 1 if the message contains only a greeting. " +
-        "Send 0 if the message contains some information besides the greeting.";
-
-    private const string _greetingInstriction =
-        "Greet the interlocutor with one word (you already know each other). " +
-        "Tell the interlocutor about how your day went (you tell about it at will). " +
-        "Ask about the thoughts, feelings, mood of the interlocutor. " +
-        "Be restrained and calm. Express your thoughts strictly.";
 
     private const string _jokeInstruction =
-        "Make a joke in an ironic style.";
+        "Make a joke.";
+
+    private const string _paliInstruction =
+        "Find the suttas in English from the Pali Canon " +
+        "on the topic specified by the user on this site (no more than six)" +
+        "suttacentral.net and give me links to them. " +
+        "Retell the content of each sutta in two sentences and give a link to each. " +
+        "Example:\n" +
+        "1. Anapanasati Sutta - this sutta describes mindfulness meditation practice centered on breath awareness " +
+        "or \"anapanasati\", specifically mindful observation of inhalation and exhalation. " +
+        "The Buddha explains how the mind can be trained to become focused " +
+        "and undistracted with regards to breathing.\n\n" +
+        "Link: https://suttacentral.net/mn149/pli\n\n";
+
+    private const string _aboutMeInstruction =
+        "Tell us about yourself based on the first system message in promt " +
+        "(choose some facts and paraphrase), add that you are a virtual interlocutor " +
+        "and created on the basis of ChatGpt. " +
+        "Communication with you takes place using an application that is named after you. " +
+        "In addition to a simple conversation, you can be a guide to the Pali Canon " +
+        "and find suttas on a topic of interest to the user.";
+
+    private const string _greetingsInstruction =
+        "Briefly greet the interlocutor, tell how your day went, " +
+        "ask about the thoughts and feelings of the interlocutor.";
 
     private readonly OpenAIService _openAiService = GetAIService();
 
-    public string ChatHistory { get; set; } = "History:";
 
-    public async Task<string> SendMessage()
+    private readonly MemoryCacheService _memoryCacheService;
+
+    public GptService(MemoryCacheService memoryCacheService)
     {
-        string promt =
-            $"{ChatHistory}\n\n" +
-            $"{_personification}" +
-            $"{_startDialogeInstruction}";
-
-
-        var request = await _openAiService.Completions.CreateCompletion(new CompletionCreateRequest()
-        {
-            Prompt = promt,
-            Model = Models.TextDavinciV3,
-            Temperature = 0.7F,
-            MaxTokens = 500
-        });
-
-        string res = request.Choices[0].Text;
-
-        if (res.StartsWith("\n\n"))
-        {
-            res = res.TrimStart('\n');
-            res = res.TrimStart('\n');
-        }
-
-        ChatHistory += $"\n{res}";
-
-        return res;
+        _memoryCacheService = memoryCacheService;
     }
 
-    public async Task<string> GetHariAnswer(string message)
+    public async Task<string> GetMessage(string idToken)
     {
-        string promt = 
-            $"{ChatHistory}\n\n" +
-            $"Message: \"{message}\"\n\n" +
-            $"{_personification}\n" +
-            $"{await GetInstruction(message)}\n" +
-            $"{_finalInstruction}";
+        var chatMessages = _memoryCacheService.GetChatMessagesFromCache(idToken);
 
-        if (await CheckMessageContainsQuestion(message)) promt += $"\n{_mesContainsQuestionInstruction}";
-        Console.WriteLine(promt);
+        string promt =
+            $"{_startDialogeInstruction}";
 
-        var request = await _openAiService.Completions.CreateCompletion(new CompletionCreateRequest()
+        chatMessages.Add(ChatMessage.FromSystem(promt));
+
+        var request = await _openAiService.ChatCompletion.CreateCompletion(new ChatCompletionCreateRequest
         {
-            Prompt = promt,
-            Model = Models.TextDavinciV3,
-            Temperature = 0.7F,
+            Messages = chatMessages,
+            Model = Models.ChatGpt3_5Turbo,
             MaxTokens = 300
         });
 
-        string res = request.Choices[0].Text;
+        string res = request.Choices[0].Message.Content;
 
-        if (res.StartsWith("\n\n"))
-        {
-            res = res.TrimStart('\n');
-            res = res.TrimStart('\n');
-        }
+        res = TrimAnswerIfItNeed(res);
 
-        ChatHistory += $"\nHari's interlocutor: \"{message}\"\nHari (you): \"{res}\"";
-        Console.WriteLine(ChatHistory);
-
-        _state = _random.Next(1, 6);
+        chatMessages.Add(ChatMessage.FromAssistant(res));
 
         return res;
     }
 
+    public async Task<string> GetAnswer(string idToken, string message, bool isPali)
+    {
+        if (await CheckMessageIsWhoAreYouAnswer(message)) await GetAboutMeAnswer(idToken, message);
+        
+        if (isPali == true) return await GetPaliAnswer(idToken, message);
+
+        else return await GetHariAnswer(idToken, message);
+    }
+
+    private async Task<string> GetHariAnswer(string idToken, string message)
+    {       
+        var chatMessages = _memoryCacheService.GetChatMessagesFromCache(idToken);
+        
+        string promt =
+            $"{await GetInstruction(idToken, message)}\n" +
+            $"{_finalInstruction}";
+
+        if (await CheckMessageContainsQuestion(message)) promt += $"\n{_mesContainsQuestionInstruction}";
+
+        chatMessages.Add(ChatMessage.FromSystem(promt));
+        chatMessages.Add(ChatMessage.FromUser(message));
+
+        var request = await _openAiService.ChatCompletion.CreateCompletion(new ChatCompletionCreateRequest
+        {
+            Messages = chatMessages,
+            Model = Models.ChatGpt3_5Turbo,
+            MaxTokens = 300
+        });
+
+        string res = request.Choices[0].Message.Content;
+
+        res = TrimAnswerIfItNeed(res);
+
+        chatMessages.Add(ChatMessage.FromAssistant(res));
+
+        _memoryCacheService.SetStateToCache(idToken, _random.Next(1, 25));
+
+        _memoryCacheService.SetChatMessagesToCache(idToken, chatMessages);
+
+        return res;
+    }
+
+    private async Task<string> GetPaliAnswer(string idToken, string message)
+    {
+        var chatMessages = _memoryCacheService.GetPaliChatMessagesFromCache(idToken);
+
+        string promt =
+            $"{_paliInstruction}\n" +
+            $"{_finalInstruction}";
+
+        chatMessages.Add(ChatMessage.FromSystem(promt));
+        chatMessages.Add(ChatMessage.FromUser(message));
+
+        var request = await _openAiService.ChatCompletion.CreateCompletion(new ChatCompletionCreateRequest
+        {
+            Messages = chatMessages,
+            Model = Models.ChatGpt3_5Turbo,
+            MaxTokens = 900
+        });
+
+        string res = request.Choices[0].Message.Content;
+
+        chatMessages.Add(ChatMessage.FromAssistant(res));
+
+        _memoryCacheService.SetPaliChatMessagesToCache(idToken, chatMessages);
+
+        return res;
+    }
+
+    private async Task<string> GetAboutMeAnswer(string idToken, string message)
+    {
+        var chatMessages = _memoryCacheService.GetChatMessagesFromCache(idToken);
+
+        string promt =
+            $"{_aboutMeInstruction}\n" +
+            $"{_finalInstruction}";
+
+        chatMessages.Add(ChatMessage.FromSystem(promt));
+        chatMessages.Add(ChatMessage.FromUser(message));
+
+        var request = await _openAiService.ChatCompletion.CreateCompletion(new ChatCompletionCreateRequest
+        {
+            Messages = chatMessages,
+            Model = Models.ChatGpt3_5Turbo,
+            MaxTokens = 300
+        });
+
+        string res = request.Choices[0].Message.Content;
+
+        res = TrimAnswerIfItNeed(res);
+
+        chatMessages.Add(ChatMessage.FromAssistant(res));
+
+        _memoryCacheService.SetChatMessagesToCache(idToken, chatMessages);
+
+        return res;
+    }
 
     private static OpenAIService GetAIService()
     {
@@ -154,26 +218,26 @@ public class GptService
         });
     }
 
-    private async Task<string> GetInstruction(string message)
+    private async Task<string> GetInstruction(string idToken, string message)
     {
-        bool mesIsGreeting = await CheckMessageIsGreeting(message);
-
-        if (mesIsGreeting) return _greetingInstriction;
+        if (await CheckMessageIsGreetings(message)) return _greetingsInstruction;
+        
+        int state = _memoryCacheService.GetStateFromCache(idToken);
 
         int emotionState = await AnalyzeEmotionalState(message);
 
-        if (emotionState != -1 && _state % 2 == 0)
+        if (emotionState != -1 && state % 2 == 0)
         {
-            if (emotionState == 0) return _neutralEmotionsInstruction + _questionInstruction;
+            if (emotionState == 0) return _questionInstruction;
 
-            else return _positiveEmotionsInstruction + _questionInstruction;
+            else return _questionInstruction;
         }
 
-        else if (emotionState != -1 && _state % 2 > 0)
+        else if (emotionState != -1 && state % 2 > 0)
         {
-            if (emotionState == 0) return _neutralEmotionsInstruction + _jokeInstruction;
+            if (emotionState == 0) return _jokeInstruction;
 
-            else return _positiveEmotionsInstruction + _jokeInstruction;
+            else return _jokeInstruction;
         }
 
         else return _negativeEmotionsInstruction;      
@@ -198,8 +262,8 @@ public class GptService
         {
             Prompt = $"Message: \"{message}\".\n\n{_questionAnalizeInstruction}",
             Model = Models.TextDavinciV3,
-            Temperature = 0F,
-            MaxTokens = 500
+            Temperature = 0.2F,
+            MaxTokens = 300
         });
 
         string res = request.Choices[0].Text;
@@ -209,14 +273,55 @@ public class GptService
         else return false;
     }
 
-    private async Task<bool> CheckMessageIsGreeting(string message)
+    private static string TrimAnswerIfItNeed(string res)
+    {
+        if (res.StartsWith("\n\n"))
+        {
+            res = res.TrimStart('\n');
+            res = res.TrimStart('\n');
+        }
+
+        if (res[res.Length - 1] != '.' || res[res.Length - 1] != '?' || res[res.Length - 1] != '!')
+        {
+            int lastIndex1 = res.LastIndexOf('.');
+
+            int lastIndex2 = res.LastIndexOf('?');
+
+            int lastIndex3 = res.LastIndexOf('!');
+
+            int lastIndex = Math.Max(Math.Max(lastIndex1, lastIndex2), lastIndex3);
+
+            res = res[..(lastIndex + 1)];
+        }
+
+        return res;
+    }
+
+    private async Task<bool> CheckMessageIsWhoAreYouAnswer(string message)
     {
         var request = await _openAiService.Completions.CreateCompletion(new CompletionCreateRequest()
         {
-            Prompt = $"Message: \"{message}\".\n\n{_checkMesIsGreetingInstruction}",
+            Prompt = $"Message: \"{message}\".\n\n{_aboutMeAnalizeInstruction}",
             Model = Models.TextDavinciV3,
-            Temperature = 0F,
-            MaxTokens = 500
+            Temperature = 0.2F,
+            MaxTokens = 300
+        });
+
+        string res = request.Choices[0].Text;
+
+        if (res.Contains('1')) return true;
+
+        else return false;
+    }
+
+    private async Task<bool> CheckMessageIsGreetings(string message)
+    {
+        var request = await _openAiService.Completions.CreateCompletion(new CompletionCreateRequest()
+        {
+            Prompt = $"Message: \"{message}\".\n\n{_greetingsAnalizeInstruction}",
+            Model = Models.TextDavinciV3,
+            Temperature = 0.2F,
+            MaxTokens = 300
         });
 
         string res = request.Choices[0].Text;
